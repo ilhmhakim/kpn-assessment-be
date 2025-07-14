@@ -1,16 +1,22 @@
-import { db } from "#dep/config/connection";
-import { TRANSACTION as TRANS } from "#dep/config/transaction";
-import { deleteQuery, insertQuery, updateQuery } from "#dep/helper/queryBuilder";
-import { SeriesRequest } from "#dep/types/MasterDataTypes";
+import { db } from "@/config/connection.js";
+import { TRANSACTION as TRANS } from "@/config/transaction.js";
+import { deleteQuery, insertQuery, updateQuery } from "@/helper/queryBuilder.js";
+import { SeriesDetailRequest, SeriesHeaderRequest } from "@/types/SeriesTypes.js";
+import { ResponseError } from "@/error/response-error.js";
+import { SeriesDataCreate } from "@/types/MasterDataTypes.js";
+import { QueryResult } from "pg";
 
-export const createSeries = async (payload: SeriesRequest) => {
+export const createSeries = async (headerPayload: SeriesHeaderRequest, detailPayload: SeriesDetailRequest[]) => {
+  // (headerPayload: SeriesHeaderRequest, detailPayload: SeriesDetailRequest[])
   const client = await db.connect();
   try {
     await client.query(TRANS.BEGIN);
-    const [q, v] = insertQuery("mst_series", payload, "series_name");
-    const result = await client.query(q, v);
+    const [headerQ, headerV] = insertQuery("mst_series", headerPayload, "series_code");
+    const headerResult = await client.query(headerQ, headerV);
+    const [detailQ, detailV] = insertQuery("mst_series_det", detailPayload);
+    await client.query(detailQ, detailV);
     await client.query(TRANS.COMMIT);
-    return result.rows[0].series_name;
+    return headerResult.rows[0].series_code;
   } catch (error) {
     console.error(error);
     await client.query(TRANS.ROLLBACK);
@@ -21,19 +27,29 @@ export const createSeries = async (payload: SeriesRequest) => {
 };
 
 export const getSeries = async () => {
-  const client = await db.connect();
+  const client = await db.connect(); // Koneksi dibuat di awal
   try {
-    await client.query(TRANS.BEGIN);
     const result = await client.query(
       `
-    SELECT * FROM mst_series
-    `
+      SELECT 
+        h.id,
+        h.series_name,
+        h.series_code,
+        h.is_active,
+        a.fullname AS created_by,
+        h.created_date AS created_at,
+        COUNT(d.question_id) AS question_count
+      FROM mst_series h
+      LEFT JOIN mst_series_det d ON h.id = d.series_id
+      LEFT JOIN mst_admin_web a ON h.created_by = a.id
+      GROUP BY h.id, h.series_name, h.series_code, h.is_active, a.fullname, h.created_date
+      ORDER BY h.created_date DESC
+      `
     );
-    await client.query(TRANS.COMMIT);
+
     return result.rows;
   } catch (error) {
     console.error(error);
-    await client.query(TRANS.ROLLBACK);
     throw error;
   } finally {
     client.release();
@@ -44,12 +60,21 @@ export const deleteSeries = async (id: string) => {
   const client = await db.connect();
   try {
     await client.query(TRANS.BEGIN);
-    const [q, v] = deleteQuery("mst_series", { id });
-    const result = await client.query(q, v);
-    if (result.rowCount === 0) throw new Error(`ID ${id} not exist`);
+    const detailResult = await client.query(
+      `
+            DELETE FROM mst_series_det WHERE series_id = $1
+            `,
+      [id]
+    );
+    const headerResult = await client.query(
+      `
+            DELETE FROM mst_series WHERE id = $1 RETURNING series_code
+            `,
+      [id]
+    );
+
     await client.query(TRANS.COMMIT);
-    console.log(result);
-    return id;
+    return headerResult.rows[0].series_code;
   } catch (error) {
     console.error(error);
     await client.query(TRANS.ROLLBACK);
@@ -59,18 +84,281 @@ export const deleteSeries = async (id: string) => {
   }
 };
 
-export const updateSeries = async (payload: SeriesRequest, id: string) => {
+export const updateSeries = async (id: string, headerPayload: SeriesHeaderRequest, detailPayload: any) => {
   const client = await db.connect();
   try {
     await client.query(TRANS.BEGIN);
-    const [q, v] = updateQuery("mst_series", payload, { id }, "series_name");
-    const result = await client.query(q, v);
-    if (result.rowCount === 0) throw new Error(`ID ${id} not exist`);
+    const [headerQ, headerV] = updateQuery("mst_series", headerPayload, { id }, "series_code");
+    const result = await client.query(headerQ, headerV);
+    if (result.rowCount === 0) throw new ResponseError(404, `Series with code ${result.rows[0].series_code} not exist`);
+    //delete first existing questions
+    const { rows } = await client.query("delete from mst_series_det where series_id = $1", [id]);
+    const [detailQ, detailV] = insertQuery("mst_series_det", detailPayload);
+    await client.query(detailQ, detailV);
     await client.query(TRANS.COMMIT);
-    return result.rows[0].series_name;
+    return result.rows[0].series_code;
   } catch (error) {
     console.error(error);
     await client.query(TRANS.ROLLBACK);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const getSeriesbyID = async (id: string) => {
+  try {
+    const client = await db.connect();
+    try {
+      const { rows: sr_dt }: QueryResult<SeriesDataCreate> = await client.query(
+        `
+        select
+          ms.*,
+          msd.questions_id,
+          cat.category_id,
+          cat.category_name,
+          cat.category_code
+        from
+          mst_series ms
+        left join (
+          select
+            series_id,
+            array_agg(question_id) as questions_id
+          from
+            mst_series_det
+          group by
+            series_id
+        ) msd on
+          msd.series_id = ms.id
+        left join (
+         select
+            distinct mqa.category_id,
+            det.series_id,
+            mc.category_code,
+            mc.category_name
+        from
+          mst_series_det det
+        left join mst_question_answer mqa on
+          mqa.id = det.question_id
+        left join mst_category mc on
+          mc.id = mqa.category_id
+        ) cat on cat.series_id = ms.id
+        where ms.id = $1
+
+        `,
+        [id]
+      );
+
+      return {
+        series_name: sr_dt[0].series_name,
+        series_code: sr_dt[0].series_code,
+        questions_id: sr_dt[0].questions_id,
+        category_id: sr_dt.map((value) => value.category_id),
+      };
+    } catch (error) {
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const getSeriesDetail = async (id: string) => {
+  const client = await db.connect();
+  try {
+    const result = await client.query(
+      `
+      SELECT 
+        s.id AS series_id,
+        s.series_name,
+        s.series_code,
+        s.is_active,
+        a_created.fullname AS created_by,
+        s.created_date,
+        a_updated.fullname AS updated_by,
+        s.updated_date,
+        
+        q_selected.id AS detail_id,
+        q.id AS question_id,
+        q.q_input_text,
+        q.q_input_image_url,
+        q.answer_type,
+        c.id AS category_id,
+        c.category_name,
+        c.category_code,
+
+        q.answer_choice_a_text,
+        q.answer_choice_a_image_url,
+        q.answer_choice_b_text,
+        q.answer_choice_b_image_url,
+        q.answer_choice_c_text,
+        q.answer_choice_c_image_url,
+        q.answer_choice_d_text,
+        q.answer_choice_d_image_url,
+        q.answer_choice_e_text,
+        q.answer_choice_e_image_url,
+        q.answer_choice_f_text,
+        q.answer_choice_f_image_url,
+        q.answer_choice_g_text,
+        q.answer_choice_g_image_url,
+
+        q.key_answer_point_a,
+        q.key_answer_point_b,
+        q.key_answer_point_c,
+        q.key_answer_point_d,
+        q.key_answer_point_e,
+        q.key_answer_point_f,
+        q.key_answer_point_g,
+
+        q.category_id,
+        
+        a.fullname AS added_by,
+        q_selected.added_at
+
+      FROM 
+        mst_series s
+      LEFT JOIN
+        mst_admin_web a_created ON s.created_by = a_created.id
+      LEFT JOIN
+        mst_admin_web a_updated ON s.updated_by = a_updated.id    
+      LEFT JOIN
+        mst_series_det q_selected ON s.id = q_selected.series_id
+      LEFT JOIN 
+        mst_question_answer q ON q_selected.question_id = q.id
+      LEFT JOIN 
+        mst_category c ON q.category_id = c.id
+      LEFT JOIN 
+        mst_admin_web a ON q.created_by = a.id
+      WHERE 
+        s.id = $1
+      ORDER BY q_selected.added_at DESC
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error("Series not found or no questions available.");
+    }
+
+    // Membuat set unik untuk kategori dari semua pertanyaan
+    const uniqueCategories: any = {};
+    result.rows.forEach((row) => {
+      if (row.category_id) {
+        uniqueCategories[row.category_id] = {
+          category_id: row.category_id,
+          category_name: row.category_name,
+          category_code: row.category_code,
+        };
+      }
+    });
+
+    // Konversi uniqueCategories menjadi array
+    const categoriesArray = Object.values(uniqueCategories);
+
+    const seriesDetail = {
+      id: result.rows[0].series_id,
+      series_name: result.rows[0].series_name,
+      series_code: result.rows[0].series_code,
+      is_active: result.rows[0].is_active,
+      created_by: result.rows[0].created_by,
+      created_at: result.rows[0].created_date,
+      updated_by: result.rows[0].updated_by,
+      updated_date: result.rows[0].updated_date,
+      categories: categoriesArray,
+      questions: result.rows.map((row) => ({
+        id: row.detail_id,
+        question_id: row.question_id,
+        input_text: row.q_input_text,
+        input_image_url: row.q_input_image_url,
+        answer_type: row.answer_type,
+        category_id: row.category_id,
+        category_name: row.category_name,
+        category_code: row.category_code,
+        answers: [
+          { text: row.answer_choice_a_text, image: row.answer_choice_a_image_url, point: row.key_answer_point_a },
+          { text: row.answer_choice_b_text, image: row.answer_choice_b_image_url, point: row.key_answer_point_b },
+          { text: row.answer_choice_c_text, image: row.answer_choice_c_image_url, point: row.key_answer_point_c },
+          { text: row.answer_choice_d_text, image: row.answer_choice_d_image_url, point: row.key_answer_point_d },
+          { text: row.answer_choice_e_text, image: row.answer_choice_e_image_url, point: row.key_answer_point_e },
+          { text: row.answer_choice_f_text, image: row.answer_choice_f_image_url, point: row.key_answer_point_f },
+          { text: row.answer_choice_g_text, image: row.answer_choice_g_image_url, point: row.key_answer_point_g },
+        ],
+        added_by: row.added_by,
+        added_at: row.added_at,
+      })),
+    };
+
+    return seriesDetail;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+export const deleteQuestionFromSeries = async (seriesId: string, questionId: string, updatePayload: any) => {
+  const client = await db.connect();
+  try {
+    await client.query(TRANS.BEGIN);
+    const [headerQ, headerV] = updateQuery("mst_series", updatePayload, {
+      id: seriesId,
+    });
+    const headerResult = await client.query(headerQ, headerV);
+
+    const result = await client.query(
+      `
+        DELETE FROM mst_series_det WHERE series_id = $1 AND question_id = $2
+        `,
+      [seriesId, questionId]
+    );
+
+    if (result.rowCount === 0) {
+      throw new ResponseError(404, `Question with ID ${questionId} is not in the Series with ID ${seriesId}`);
+    }
+
+    await client.query(TRANS.COMMIT);
+  } catch (error) {
+    console.error(error);
+    await client.query(TRANS.ROLLBACK);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const getAvailableQuestionsForSeries = async (seriesId: string) => {
+  const client = await db.connect();
+  try {
+    const existingQuestions = await client.query(`SELECT question_id FROM mst_series_det WHERE series_id = $1`, [
+      seriesId,
+    ]);
+
+    const existingIds = existingQuestions.rows.map((r) => r.question_id);
+
+    let exclusionClause = "";
+    let queryParams: any[] = [];
+
+    if (existingIds.length > 0) {
+      queryParams.push(existingIds);
+      exclusionClause = "WHERE id != ALL($1)";
+    }
+
+    const result = await client.query(
+      `
+      SELECT 
+        id, 
+        question_code
+      FROM mst_question_answer
+      ${exclusionClause}
+      ORDER BY question_code
+      `,
+      queryParams
+    );
+
+    return result.rows;
+  } catch (error) {
     throw error;
   } finally {
     client.release();

@@ -1,73 +1,171 @@
-import { createSeries, deleteSeries, getSeries, updateSeries } from "#dep/models/SeriesModel";
-import { SeriesRequest } from "#dep/types/MasterDataTypes";
-import { Request, Response } from "express";
-import { v4 as uuidv4 } from "uuid";
+import {
+  createSeries,
+  deleteQuestionFromSeries,
+  deleteSeries,
+  getAvailableQuestionsForSeries,
+  getSeries,
+  getSeriesbyID,
+  getSeriesDetail,
+  updateSeries,
+} from "@/models/SeriesModel.js";
+import { NextFunction, Request, Response } from "express";
+import { v7 as uuid } from "uuid";
+import { Validation } from "@/validation/Validation.js";
+import { SeriesValidation } from "@/validation/SeriesValidation.js";
+import { SeriesDetailRequest, SeriesHeaderRequest, SeriesQuery, SeriesRequests } from "@/types/SeriesTypes.js";
 
-export const handleCreateSeries = async (req: Request, res: Response) => {
-  const payload: SeriesRequest = {
-    id: uuidv4(),
-    series_name: req.body.series_name,
-    is_active: req.body.is_active,
-    created_by: req.body.created_by,
-    created_date: new Date(),
-  };
-
+export const handleCreateSeries = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let result = await createSeries(payload);
+    const validatedRequest = Validation.validate(SeriesValidation.CREATE, req.body);
+
+    const date = new Date();
+    const seriesId = uuid();
+    const creator = req.userDecode!.user_id;
+
+    const seriesHeaderRequest: SeriesHeaderRequest = {
+      id: seriesId,
+      series_name: validatedRequest.series_name,
+      series_code: validatedRequest.series_code,
+      is_active: validatedRequest.is_active,
+      created_by: creator,
+      created_date: date,
+    };
+
+    const seriesDetailRequest = validatedRequest.questions.map((prev: SeriesDetailRequest) => ({
+      ...prev,
+      id: uuid(),
+      series_id: seriesId,
+      added_by: creator,
+      added_at: date,
+    }));
+
+    const result = await createSeries(seriesHeaderRequest, seriesDetailRequest);
+
     res.status(200).send({
-      message: `Success create series`,
-      series_name: result,
+      message: `Series with code ${result} is created successfully!`,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };
 
-export const handleGetSeries = async (req: Request, res: Response) => {
-  const payload = req.body;
+export const handleGetSeries = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let result = await getSeries();
+    const result = await getSeries();
     res.status(200).send({
-      message: `Success get series`,
+      message: "Success!",
       data: result,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };
 
-export const handleDeleteSeries = async (req: Request, res: Response) => {
-  const id = req.params.id;
+export const handleDeleteSeries = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let result = await deleteSeries(id);
+    const validatedId = Validation.validate(SeriesValidation.ID, req.params.id);
+    const result = await deleteSeries(validatedId);
     res.status(200).send({
-      message: `Success delete series`,
-      id: id,
+      message: `Series's with code ${result} deleted successfully!`,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };
 
-export const handleUpdateSeries = async (req: Request, res: Response) => {
-  const today = new Date();
-  const id = req.params.id;
-  const payload = { ...req.body, updated_date: today };
+export const handleUpdateSeries = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let result = await updateSeries(payload, id);
+    const validatedId = Validation.validate(SeriesValidation.ID, req.params.id);
+    const validatedRequest = Validation.validate(SeriesValidation.UPDATE, req.body);
+
+    const date = new Date();
+    const seriesId = validatedId;
+    const creator = req.userDecode!.user_id;
+
+    const seriesHeaderRequest: SeriesHeaderRequest = {
+      series_name: validatedRequest.series_name,
+      series_code: validatedRequest.series_code,
+      is_active: validatedRequest.is_active,
+      updated_by: creator,
+      updated_date: date,
+    };
+
+    const seriesDetailRequest = validatedRequest.questions.map((prev: SeriesDetailRequest) => ({
+      ...prev,
+      id: uuid(),
+      series_id: seriesId,
+      added_by: creator,
+      added_at: date,
+    }));
+
+    const result = await updateSeries(validatedId, seriesHeaderRequest, seriesDetailRequest);
+
     res.status(200).send({
-      message: `Success update series`,
-      series_name: result,
+      message: `Series with code ${result} is updated successfully!`,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const handleGetDetailSeries = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const validatedId = Validation.validate(SeriesValidation.ID, req.params.id);
+    const result = await getSeriesDetail(validatedId);
+    res.status(200).send({
+      message: `Success!`,
+      data: result,
     });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const handleGetSeriesByID = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const result = await getSeriesbyID(id);
+    res.status(200).send({
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const handleGetAvailableQuestionForSeries = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const validatedId = Validation.validate(SeriesValidation.ID, req.params.id);
+
+    const result = await getAvailableQuestionsForSeries(validatedId);
+
+    res.status(200).send({
+      message: "Success!",
+      data: result,
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const handleDeleteQuestionFromSeries = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const validatedSeriesId = Validation.validate(SeriesValidation.ID, req.params.id);
+    const validatedQuestionId = Validation.validate(SeriesValidation.ID, req.params.questionId);
+    const updatedBy = req.userDecode!.user_id;
+    const updatedAt = new Date();
+
+    const updatePayload = {
+      updated_by: updatedBy,
+      updated_date: updatedAt,
+    };
+
+    await deleteQuestionFromSeries(validatedSeriesId, validatedQuestionId, updatePayload);
+
+    res.status(200).send({
+      message: "Success Delete Question!",
+    });
+  } catch (e) {
+    next(e);
   }
 };

@@ -1,22 +1,19 @@
-import { db } from "#dep/config/connection";
-import { TRANSACTION as TRANS } from "#dep/config/transaction";
-import { deleteQuery, insertQuery, updateQuery } from "#dep/helper/queryBuilder";
-import { FunctionMenuRequest } from "#dep/types/MasterDataTypes";
+import { db } from "@/config/connection.js";
+import { TRANSACTION as TRANS } from "@/config/transaction.js";
+import { deleteQuery, insertQuery, updateQuery } from "@/helper/queryBuilder.js";
+import { FunctionMenuRequest } from "@/types/MasterDataTypes.js";
 
 export const getFunctionMenu = async () => {
   const client = await db.connect();
   try {
-    await client.query(TRANS.BEGIN);
     const result = await client.query(
       `
     SELECT * FROM mst_function_menu
     `
     );
-    await client.query(TRANS.COMMIT);
     return result.rows;
   } catch (error) {
     console.error(error);
-    await client.query(TRANS.ROLLBACK);
     throw error;
   } finally {
     client.release();
@@ -71,6 +68,24 @@ export const updateFunctionMenu = async (payload: any, id: string) => {
   } catch (error) {
     console.error(error);
     await client.query(TRANS.ROLLBACK);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const getFunctionMenuDetail = async (id: string) => {
+  const client = await db.connect();
+  try {
+    const result = await client.query(
+      `
+        SELECT * FROM mst_function_menu WHERE id = $1
+        `,
+      [id]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error(error);
     throw error;
   } finally {
     client.release();

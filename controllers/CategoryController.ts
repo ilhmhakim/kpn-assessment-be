@@ -1,0 +1,78 @@
+import { async } from "rxjs";
+import { NextFunction, Request, Response } from "express";
+import { createAdmin } from "@/models/AdminWebModel.js";
+import { Validation } from "@/validation/Validation.js";
+import { CategoryValidation } from "@/validation/CategoryValidation.js";
+import { createCategory, deleteCategory, getCategory, updateCategory } from "@/models/CategoryModel.js";
+import { error } from "winston";
+
+export const handleCreateCategory = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const today = new Date();
+    const payload = {
+      category_name: req.body.category_name,
+      category_code: req.body.category_code,
+      created_by: req.userDecode?.user_id,
+      created_at: today,
+      criteria_id: req.body.criteria_id,
+      is_active: req.body.is_active,
+    };
+    const validatedRequest = Validation.validate(CategoryValidation.CREATE, payload);
+    let result = await createCategory(validatedRequest);
+    res.status(200).send({
+      message: `Success create category`,
+      category_code: result,
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const handleGetCategory = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    let result = await getCategory();
+    res.status(200).send({
+      message: `Success get category`,
+      data: result,
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const handleUpdateCategory = async (req: Request, res: Response, next: NextFunction) => {
+  const id = Number(req.params.id);
+  const today = new Date();
+  const payload = {
+    updated_by: req.userDecode?.user_id,
+    updated_at: today,
+    ...req.body,
+  };
+
+  try {
+    const validatedRequest = Validation.validate(CategoryValidation.UPDATE, payload);
+    const validatedId = Validation.validate(CategoryValidation.ID, id);
+    let result = await updateCategory(validatedRequest, validatedId);
+    res.status(200).send({
+      message: `Success update category`,
+      category_code: result,
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const handleDeleteCategory = async (req: Request, res: Response, next: NextFunction) => {
+  const id = Number(req.params.id);
+  try {
+    const validatedId = Validation.validate(CategoryValidation.ID, id);
+    console.log(validatedId);
+    let result = await deleteCategory(validatedId);
+    res.status(200).send({
+      message: `Success delete category`,
+      id: result,
+    });
+  } catch (e) {
+    next(e);
+  }
+};

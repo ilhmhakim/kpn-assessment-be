@@ -1,14 +1,14 @@
-import { getAdminMenu, getAllMenu } from "#dep/models/MenuModel";
-import { Request, Response } from "express";
-import { Secret, verify } from "jsonwebtoken";
+import { getAdminMenu, getAllMenu } from "@/models/MenuModel.js";
+import { NextFunction, Request, Response } from "express";
+import { Validation } from "@/validation/Validation.js";
+import { MenuValidation } from "@/validation/MenuValidation.js";
 
-export const handleGetAdminMenu = async (req: Request, res: Response) => {
-  const roleId = req.userDecode?.role_id;
-
+export const handleGetAdminMenu = async (req: Request, res: Response, next: NextFunction) => {
+  const roleId = String(req.userDecode?.role_id);
   try {
-    if (!roleId) throw new Error("Role ID not provided");
-    const result = await getAdminMenu(roleId);
-    const groupedData = result.reduce((acc, item) => {
+    const validatedRoleId = Validation.validate(MenuValidation.ID, roleId);
+    let result = await getAdminMenu(validatedRoleId);
+    const groupedData = result.reduce((acc: any, item: any) => {
       const key = item.subheader || "Others"; // Use "Others" for null subheaders
       if (!acc[key]) {
         acc[key] = [];
@@ -50,14 +50,12 @@ export const handleGetAdminMenu = async (req: Request, res: Response) => {
       message: `Success get menu`,
       data: formattedResult,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };
 
-export const handleGetAllMenu = async (req: Request, res: Response) => {
+export const handleGetAllMenu = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await getAllMenu();
 
@@ -65,9 +63,7 @@ export const handleGetAllMenu = async (req: Request, res: Response) => {
       message: `Success get all menu`,
       data: result,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };

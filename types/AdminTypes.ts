@@ -8,6 +8,7 @@ export type User = {
 
 export type TokenPayload = {
   user_id: string;
+  email?: string;
   role_id: string;
   permission: Array<{
     menu_id: number;
@@ -16,4 +17,16 @@ export type TokenPayload = {
     fupdate: boolean;
     fdelete: boolean;
   }>;
+};
+
+export type TokenAssesseePayload = Omit<TokenPayload, "email" | "role_id" | "permission"> & {
+  type: "external" | "internal";
+};
+
+export type Permission = {
+  menu_id: number;
+  fcreate: boolean;
+  fread: boolean;
+  fupdate: boolean;
+  fdelete: boolean;
 };

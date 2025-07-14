@@ -3,26 +3,26 @@ import {
   deleteFunctionMenu,
   getFunctionMenu,
   updateFunctionMenu,
-} from "#dep/models/FunctionMenuModel";
-import { FunctionMenuRequest } from "#dep/types/MasterDataTypes";
-import { Request, Response } from "express";
+} from "@/models/FunctionMenuModel.js";
+import { FunctionMenuRequest } from "@/types/MasterDataTypes.js";
+import { NextFunction, Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
+import { Validation } from "@/validation/Validation.js";
+import { FunctionMenuValidation } from "@/validation/FunctionMenuValidation.js";
 
-export const handleGetFunctionMenu = async (_req: Request, res: Response) => {
+export const handleGetFunctionMenu = async (req: Request, res: Response, next: NextFunction) => {
   try {
     let result = await getFunctionMenu();
     res.status(200).send({
       message: `Success get function menu`,
       data: result,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };
 
-export const handleCreateFunctionMenu = async (req: Request, res: Response) => {
+export const handleCreateFunctionMenu = async (req: Request, res: Response, next: NextFunction) => {
   const today = new Date();
   const payload: FunctionMenuRequest = {
     id: uuidv4(),
@@ -34,45 +34,39 @@ export const handleCreateFunctionMenu = async (req: Request, res: Response) => {
   };
 
   try {
-    let result = await createFunctionMenu(payload);
+    const validatedRequest = Validation.validate(FunctionMenuValidation.CREATE, payload);
+    let result = await createFunctionMenu(validatedRequest);
     res.status(200).send({
       message: `Success create function menu`,
       fm_code: result,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };
 
-export const handleDeleteFunctionMenu = async (req: Request, res: Response) => {
-  const id = req.params.id;
+export const handleDeleteFunctionMenu = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let result = await deleteFunctionMenu(id);
+    const validatedId = Validation.validate(FunctionMenuValidation.ID, req.params.id);
+    await deleteFunctionMenu(validatedId);
     res.status(200).send({
       message: `Success delete function menu`,
-      id: id,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };
 
-export const handleUpdateFunctionMenu = async (req: Request, res: Response) => {
-  const id = req.params.id;
-  const payload = req.body;
+export const handleUpdateFunctionMenu = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let result = await updateFunctionMenu(payload, id);
+    const validatedRequest = Validation.validate(FunctionMenuValidation.UPDATE, req.body);
+    const validatedId = Validation.validate(FunctionMenuValidation.ID, req.params.id);
+    let result = await updateFunctionMenu(validatedRequest, validatedId);
     res.status(200).send({
       message: `Success update function menu`,
       fm_code: result,
     });
-  } catch (error: any) {
-    res.status(500).send({
-      message: error.message,
-    });
+  } catch (e) {
+    next(e);
   }
 };

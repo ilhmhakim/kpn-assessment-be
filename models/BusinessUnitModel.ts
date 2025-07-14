@@ -1,7 +1,7 @@
-import { db } from "#dep/config/connection";
-import { TRANSACTION as TRANS } from "#dep/config/transaction";
-import { deleteQuery, insertQuery, updateQuery } from "#dep/helper/queryBuilder";
-import { BURequest } from "#dep/types/MasterDataTypes";
+import { db } from "@/config/connection.js";
+import { TRANSACTION as TRANS } from "@/config/transaction.js";
+import { deleteQuery, insertQuery, updateQuery } from "@/helper/queryBuilder.js";
+import { BURequest } from "@/types/MasterDataTypes.js";
 
 export const createBusinessUnit = async (payload: BURequest) => {
   const client = await db.connect();
@@ -23,17 +23,14 @@ export const createBusinessUnit = async (payload: BURequest) => {
 export const getBusinessUnit = async () => {
   const client = await db.connect();
   try {
-    await client.query(TRANS.BEGIN);
     const result = await client.query(
       `
     SELECT * FROM mst_business_unit
     `
     );
-    await client.query(TRANS.COMMIT);
     return result.rows;
   } catch (error) {
     console.error(error);
-    await client.query(TRANS.ROLLBACK);
     throw error;
   } finally {
     client.release();
@@ -66,11 +63,28 @@ export const deleteBusinessUnit = async (id: string) => {
     const result = await client.query(q, v);
     if (result.rowCount === 0) throw new Error(`ID ${id} not exist`);
     await client.query(TRANS.COMMIT);
-    console.log(result);
     return id;
   } catch (error) {
     console.error(error);
     await client.query(TRANS.ROLLBACK);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const getBusinessUnitDetail = async (id: string) => {
+  const client = await db.connect();
+  try {
+    const result = await client.query(
+      `
+        SELECT * FROM mst_business_unit WHERE id = $1
+        `,
+      [id]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error(error);
     throw error;
   } finally {
     client.release();

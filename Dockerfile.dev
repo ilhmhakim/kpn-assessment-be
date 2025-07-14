@@ -1,10 +1,25 @@
 FROM node:20-alpine
 
+# Install build dependencies for native modules
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    musl-dev \
+    giflib-dev \
+    pixman-dev \
+    pangomm-dev \
+    libjpeg-turbo-dev \
+    freetype-dev
+
 WORKDIR /app
 
 COPY package.json ./
 COPY package-lock.json ./
-COPY ecosystem.config.js ./
+COPY ecosystem.config.json ./
 
 RUN npm install
 RUN npm install -g pm2
@@ -15,4 +30,4 @@ EXPOSE 5000
 EXPOSE 443
 EXPOSE 80
 
-CMD ["pm2-runtime", "start", "ecosystem.config.js"]
+CMD ["pm2-runtime", "start", "ecosystem.config.json"]

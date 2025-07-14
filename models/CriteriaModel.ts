@@ -1,14 +1,31 @@
-import { db } from "#dep/config/connection";
-import { TRANSACTION as TRANS } from "#dep/config/transaction";
-import {
-  deleteQuery,
-  insertQuery,
-  updateCriteriaQuery,
-  updateQuery,
-} from "#dep/helper/queryBuilder";
-import { Criteria, CriteriaGroup } from "#dep/types/MasterDataTypes";
+import { db } from "@/config/connection.js";
+import { TRANSACTION as TRANS } from "@/config/transaction.js";
+import { deleteQuery, insertQuery, updateCriteriaQuery, updateQuery } from "@/helper/queryBuilder.js";
+import { Criteria, CriteriaGroup, StandardizedPayload } from "@/types/MasterDataTypes.js";
 
-export const createCriteria = async (groupPayload: CriteriaGroup, criteriaPayload: Criteria[]) => {
+export const getCriteriaColor = async () => {
+  const client = await db.connect();
+  try {
+    const result = await client.query(
+      `
+        SELECT * FROM mst_criteria_color
+        `
+    );
+    return result.rows;
+  } catch (e) {
+    console.log(e);
+    await client.query(TRANS.ROLLBACK);
+    throw e;
+  } finally {
+    client.release();
+  }
+};
+
+export const createCriteria = async (
+  groupPayload: CriteriaGroup,
+  criteriaPayload: Criteria[],
+  standardizedPayload: StandardizedPayload[]
+) => {
   const client = await db.connect();
   try {
     await client.query(TRANS.BEGIN);
@@ -17,7 +34,10 @@ export const createCriteria = async (groupPayload: CriteriaGroup, criteriaPayloa
     const groupResult = await client.query(groupQ, groupV);
     const [criteriaQ, criteriaV] = insertQuery("mst_criteria", criteriaPayload, "criteria_name");
     const criteriaResult = await client.query(criteriaQ, criteriaV);
-
+    if (standardizedPayload !== undefined) {
+      const [standardizedQ, standardizedV] = insertQuery("mst_standardized_score", standardizedPayload);
+      const standardizedResult = await client.query(standardizedQ, standardizedV);
+    }
     await client.query(TRANS.COMMIT);
     return groupResult.rows[0].value_name;
   } catch (error) {
@@ -32,20 +52,19 @@ export const createCriteria = async (groupPayload: CriteriaGroup, criteriaPayloa
 export const getCriteria = async () => {
   const client = await db.connect();
   try {
-    await client.query(TRANS.BEGIN);
     const result = await client.query(
       `
-    SELECT cr.*, v.value_code, v.value_name, v.id AS value_id
+    SELECT cr.*, v.value_code, v.value_name, v.id AS value_id, cl.id as color_id, cl.name as color_name, cl.hex_code, ss.id as standardized_id, ss.value_id as standardized_value_id, ss.raw_score, ss.standardized_score 
     FROM mst_criteria cr
     JOIN mst_value v ON cr.category_fk = v.id
-    ORDER BY cr.minimum_score ASC
+    LEFT JOIN mst_criteria_color cl ON cr.color_id = cl.id
+    LEFT JOIN mst_standardized_score ss ON v.id = ss.value_id
+    ORDER BY v.created_date DESC, v.value_name DESC, cr.minimum_score ASC, ss.raw_score ASC
     `
     );
-    await client.query(TRANS.COMMIT);
     return result.rows;
   } catch (error) {
     console.error(error);
-    await client.query(TRANS.ROLLBACK);
     throw error;
   } finally {
     client.release();
@@ -86,10 +105,14 @@ export const deleteCriteria = async (id: string) => {
 export const updateCriteria = async (
   payload: CriteriaGroup,
   newCriteria: Criteria[],
-  id: string
+  id: string,
+  standardizedPayload: StandardizedPayload
 ) => {
   const client = await db.connect();
   try {
+    console.log("masuk update criteria model");
+    console.log(payload);
+    console.log(newCriteria);
     await client.query(TRANS.BEGIN);
 
     // UPDATE CATEGORY
@@ -102,9 +125,27 @@ export const updateCriteria = async (
     });
     await client.query(deleteCriteriaQ, deleteCriteriaV);
 
+    console.log("add new criteria model");
+    console.log(newCriteria);
     // ADD NEW CRITERIA
     const [insertCriteriaQ, insertCriteriaV] = insertQuery("mst_criteria", newCriteria);
+    console.log("cek query");
+    console.log(insertCriteriaQ, insertCriteriaV);
     await client.query(insertCriteriaQ, insertCriteriaV);
+
+    // DELETE PREV STANDARDIZED
+    await client.query(
+      `
+      DELETE FROM mst_standardized_score WHERE value_id = $1
+        `,
+      [id]
+    );
+
+    if (standardizedPayload !== undefined) {
+      // ADD NEW SRANDARDIZED
+      const [standardizedQ, standardizedV] = insertQuery("mst_standardized_score", standardizedPayload);
+      const standardizedResult = await client.query(standardizedQ, standardizedV);
+    }
 
     await client.query(TRANS.COMMIT);
     return groupResult.rows[0].value_name;
@@ -117,46 +158,40 @@ export const updateCriteria = async (
   }
 };
 
-// export const updateCriteria1 = async (
-//   payload: CriteriaGroup,
-//   addedCriteria: Criteria[],
-//   editedCriteria: Criteria[],
-//   deletedCriteria: Criteria[]
-// ) => {
-//   const client = await db.connect();
-//   try {
-//     await client.query(TRANS.BEGIN);
-
-//     // UPDATE CATEGORY QUERY
-//     const [groupQ, groupV] = updateQuery("mst_value", payload, { id: payload.id }, "value_name");
-
-//     // ADD CRITERIA QUERY
-//     const [insertCriteriaQ, insertCriteriaV] = insertQuery("mst_criteria", addedCriteria);
-
-//     // UPDATE CRITERIA QUERY
-//     const updateCriteriaQ = updateCriteriaQuery(editedCriteria);
-
-//     // DELETE CRITERIA QUERY
-//     const deleteCriteriaQ = `
-//       DELETE FROM mst_criteria
-//       WHERE id IN (${deletedCriteria.map((item) => `'${item}'`).join(", ")})`;
-//     console.log(deleteCriteriaQ);
-
-//     // EXECUTE ALL QUERY PARALLEL
-//     const [groupResult, insertItem, editItem, deleteItem] = await Promise.all([
-//       await client.query(groupQ, groupV),
-//       addedCriteria.length !== 0 ? client.query(insertCriteriaQ, insertCriteriaV) : null,
-//       editedCriteria.length !== 0 ? client.query(updateCriteriaQ) : null,
-//       deletedCriteria.length !== 0 ? client.query(deleteCriteriaQ) : null,
-//     ]);
-
-//     await client.query(TRANS.COMMIT);
-//     return groupResult.rows[0].value_name;
-//   } catch (error) {
-//     console.error(error);
-//     await client.query(TRANS.ROLLBACK);
-//     throw error;
-//   } finally {
-//     client.release();
-//   }
-// };
+export const getCriteriaDetail = async (id: string) => {
+  const client = await db.connect();
+  try {
+    const result = await client.query(
+      `
+      SELECT 
+        v.id AS value_id, 
+        v.value_name, 
+        v.value_code, 
+        cr.id as criteria_id,
+        cr.criteria_name, 
+        cr.minimum_score, 
+        cr.maximum_score, 
+        cr.description, 
+        cr.color_id, 
+        cl.name as color_name,
+        cl.hex_code,
+        st.id as standardized_id,
+        st.raw_score,
+        st.standardized_score
+      FROM mst_value v
+      LEFT JOIN mst_criteria cr ON v.id = cr.category_fk
+      LEFT JOIN mst_criteria_color cl ON cr.color_id = cl.id
+      LEFT JOIN mst_standardized_score st ON v.id = st.value_id
+      WHERE v.id = $1
+      ORDER BY cr.minimum_score ASC
+      `,
+      [id]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error(error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};

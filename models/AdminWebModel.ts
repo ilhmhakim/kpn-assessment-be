@@ -1,25 +1,26 @@
-import { db } from "#dep/config/connection";
-import { TRANSACTION as TRANS } from "#dep/config/transaction";
-import { accessExpiry, refreshExpiry } from "#dep/constant";
-import { createOTP } from "#dep/helper/auth/OTP";
-import { hashPassword, validatePassword } from "#dep/helper/auth/password";
-import { deleteQuery, insertQuery, updateQuery } from "#dep/helper/queryBuilder";
-import { Emailer } from "#dep/services/mail/Emailer";
-import { User } from "#dep/types/AdminTypes";
-import { Secret, sign, verify } from "jsonwebtoken";
+import { db } from "@/config/connection.js";
+import { TRANSACTION as TRANS } from "@/config/transaction.js";
+import { accessExpiry, refreshExpiry } from "@/constant.js";
+import { createOTP } from "@/helper/auth/OTP.js";
+import { hashPassword, validatePassword } from "@/helper/auth/password.js";
+import { deleteQuery, insertQuery, updateQuery } from "@/helper/queryBuilder.js";
+import { Emailer } from "@/services/mail/Emailer.js";
+import { User } from "@/types/AdminTypes.js";
+import jwt, { Secret } from "jsonwebtoken";
+const { sign, verify } = jwt;
 
 export const loginAdmin = async (emailOrUname: string, password: string) => {
   const client = await db.connect();
 
   try {
     await client.query(TRANS.BEGIN);
-    const checkUserData = await client.query(
-      "SELECT * FROM mst_admin_web WHERE username = $1 OR email = $1",
-      [emailOrUname]
-    );
+    const checkUserData = await client.query("SELECT * FROM mst_admin_web WHERE username = $1 OR email = $1", [
+      emailOrUname,
+    ]);
     if (checkUserData.rows.length === 0) {
       throw new Error("User Not Found");
     }
+
     const data = checkUserData.rows[0];
 
     const permission = await client.query(
@@ -53,15 +54,11 @@ export const loginAdmin = async (emailOrUname: string, password: string) => {
       { expiresIn: refreshExpiry }
     );
 
-    const [insertToken, valueToken] = updateQuery(
-      "mst_admin_web",
-      { refresh_token: refreshToken },
-      { id: data.id }
-    );
+    const [insertToken, valueToken] = updateQuery("mst_admin_web", { refresh_token: refreshToken }, { id: data.id });
     await client.query(insertToken, valueToken);
 
     await client.query(TRANS.COMMIT);
-
+    console.log(data);
     if (data) {
       const valid = await validatePassword(password, data.password);
       if (!valid) {
@@ -72,6 +69,33 @@ export const loginAdmin = async (emailOrUname: string, password: string) => {
     } else {
       throw new Error("User Not Found");
     }
+  } catch (error) {
+    await client.query(TRANS.ROLLBACK);
+    console.error(error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const verifyPermission = async (roleId: any, menuId: any) => {
+  const client = await db.connect();
+
+  try {
+    await client.query(TRANS.BEGIN);
+
+    const checkPermission = await client.query(
+      `
+        SELECT menu_id, fcreate, fread, fupdate, fdelete
+        FROM mst_menu_access
+        WHERE role_id = $1 AND menu_id = $2
+      `,
+      [roleId, menuId]
+    );
+
+    const permission = checkPermission.rows[0];
+    await client.query(TRANS.COMMIT);
+    return permission;
   } catch (error) {
     await client.query(TRANS.ROLLBACK);
     console.error(error);
@@ -160,7 +184,7 @@ export const getAdminById = async (id: string) => {
 
     const { rows } = await client.query(
       `
-      SELECT a.id, a.username, a.fullname, a.email, a.is_active, r.role_name, a.created_date
+      SELECT a.id, a.username, a.fullname, a.email, a.is_active, a.role_id, r.role_name, a.created_date
       FROM mst_admin_web a
       LEFT JOIN mst_role r ON a.role_id = r.id
       WHERE a.id = $1
@@ -185,10 +209,10 @@ export const createAdmin = async (payload: any) => {
   try {
     await client.query(TRANS.BEGIN);
 
-    const checkUserExist = await client.query(
-      "SELECT * FROM mst_admin_web WHERE username = $1 OR email = $2",
-      [payload.username, payload.email]
-    );
+    const checkUserExist = await client.query("SELECT * FROM mst_admin_web WHERE username = $1 OR email = $2", [
+      payload.username,
+      payload.email,
+    ]);
     if (checkUserExist.rows.length > 0) {
       throw new Error("User already exist");
     }
@@ -283,12 +307,7 @@ export const resetPassword = async (newPass: string, email: string) => {
     const payload = {
       password: hashedNewPass,
     };
-    const [updatePassQuery, updatePassValue] = updateQuery(
-      "mst_admin_web",
-      payload,
-      { email: email },
-      "username"
-    );
+    const [updatePassQuery, updatePassValue] = updateQuery("mst_admin_web", payload, { email: email }, "username");
     await client.query(updatePassQuery, updatePassValue);
 
     const [cleanQuery, cleanValue] = deleteQuery("otp_trans", { email: email });
@@ -306,17 +325,57 @@ export const resetPassword = async (newPass: string, email: string) => {
 
 export const getPermission = async (id: string | null = null) => {
   const client = await db.connect();
-
   try {
-    await client.query(TRANS.BEGIN);
     const { rows } = await client.query(
       `
-      SELECT rl.*, ad.fullname AS created_by, ac.menu_id, ac.fcreate, ac.fread, ac.fupdate, ac.fdelete, pg.name AS menu_name 
+          SELECT rl.*, ad.fullname AS created_by, ac.menu_id, ac.fcreate, ac.fread, ac.fupdate, ac.fdelete, pg.name AS menu_name 
       FROM mst_role rl
       LEFT JOIN mst_menu_access ac ON rl.id = ac.role_id
       LEFT JOIN mst_menu pg ON ac.menu_id = pg.id
       LEFT JOIN mst_admin_web ad ON rl.created_by = ad.id
       WHERE (rl.id = $1 OR $1 IS NULL)
+      `,
+      [id]
+    );
+
+    return rows;
+  } catch (error) {
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const getPermission2 = async (id: string | null = null) => {
+  const client = await db.connect();
+
+  try {
+    await client.query(TRANS.BEGIN);
+    const { rows } = await client.query(
+      `
+     select
+      coalesce(mma.role_id, $1) as role_id,
+      ad.fullname as created_by,
+      rl.created_date,
+      rl.updated_date,
+      rl.role_name,
+      coalesce(mma.fcreate, false) as fcreate ,
+      coalesce(mma.fread, false) as fread ,
+      coalesce(mma.fupdate, false) as fupdate,
+      coalesce(mma.fdelete, false) as fdelete ,
+      mm.subheader ,
+       mm.name as menu_name,
+      mm.id as menu_id
+    from
+      mst_menu mm
+    left join mst_menu_access mma on
+      mm.id = mma.menu_id
+    left join mst_role rl on rl.id = mma.role_id
+    LEFT JOIN mst_admin_web ad ON rl.created_by = ad.id
+    where
+      mma.role_id = $1
+      or mma.role_id is null
+    order by mm.id asc
       `,
       [id]
     );
@@ -376,6 +435,38 @@ export const updateRole = async (id: string, payload: any, permPayload: any) => 
     console.error(error);
     await client.query(TRANS.ROLLBACK);
     throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const updateAdmin = async (id: string, payload: any) => {
+  const client = await db.connect();
+  try {
+    await client.query(TRANS.BEGIN);
+    const [queryAdminUpdate, valueAdminUpdate] = updateQuery("mst_admin_web", payload, { id: id });
+    await client.query(queryAdminUpdate, valueAdminUpdate);
+    await client.query(TRANS.COMMIT);
+  } catch (e) {
+    throw e;
+  } finally {
+    client.release();
+  }
+};
+
+export const deleteAdmin = async (id: string) => {
+  const client = await db.connect();
+  try {
+    await client.query(TRANS.BEGIN);
+    await client.query(
+      `
+      DELETE FROM mst_admin_web WHERE id = $1
+    `,
+      [id]
+    );
+    await client.query(TRANS.COMMIT);
+  } catch (e) {
+    throw e;
   } finally {
     client.release();
   }

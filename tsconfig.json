@@ -1,27 +1,20 @@
 {
   "compilerOptions": {
-    "target": "es6",
-    "module": "commonjs",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "paths": {
-      "#dep/*": [
-        "./*"
-      ]
-    },
+    "target": "ES2020",
+    "module": "ESNext",
     "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "strict": true,
     "outDir": "./dist",
-    "typeRoots": [
-      "./types"
-    ]
+    "rootDir": "./",
+    "baseUrl": ".",
+    "jsx" : "react",
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
-  "include": [
-    "./**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ],
-  "skipLibCheck": true /* Skip type checking all .d.ts files. */
+"include": ["**/*.ts", "**/*.tsx", "./assets"],
+  "exclude": ["node_modules", "dist"]
 }
